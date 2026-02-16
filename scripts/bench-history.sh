@@ -5,15 +5,37 @@
 #
 # Defaults: 30 commits, 3 runs per benchmark
 #
+# Reads source_dir and build_dir from wxm-bench.toml if present,
+# falling back to ~/GitHub/warpxm.
+#
 set -euo pipefail
 
-WARPXM_SRC="$HOME/GitHub/warpxm"
-WARPXM_BUILD="$HOME/GitHub/warpxm/build"
-TESTING_DIR="$HOME/GitHub/warpxm-testing"
+# Derive project root from script location
+TESTING_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+CONFIG_FILE="$TESTING_DIR/wxm-bench.toml"
+
+# Extract a simple key = "value" from a TOML file.
+# Usage: toml_get <file> <section> <key>
+toml_get() {
+    local file="$1" section="$2" key="$3"
+    if [ ! -f "$file" ]; then
+        return 1
+    fi
+    # Find the section, then extract the key's value
+    sed -n "/^\[$section\]/,/^\[/p" "$file" \
+        | grep "^${key}[[:space:]]*=" \
+        | head -1 \
+        | sed 's/^[^=]*=[[:space:]]*"\(.*\)"/\1/' \
+        | sed "s|^~|$HOME|"
+}
+
+# Read paths from config, falling back to defaults
+WARPXM_SRC=$(toml_get "$CONFIG_FILE" "paths" "source_dir" 2>/dev/null || echo "$HOME/GitHub/warpxm")
+WARPXM_BUILD=$(toml_get "$CONFIG_FILE" "paths" "build_dir" 2>/dev/null || echo "$HOME/GitHub/warpxm/build")
 
 NUM_COMMITS="${1:-30}"
 NUM_RUNS="${2:-3}"
-NUM_PROCS="0,6"
+NUM_PROCS=$(toml_get "$CONFIG_FILE" "run" "num_procs" 2>/dev/null || echo "0,6")
 
 cd "$WARPXM_SRC"
 
@@ -29,6 +51,8 @@ echo " WARPXM Benchmark History"
 echo "========================================"
 echo "  Source:      $WARPXM_SRC"
 echo "  Build:       $WARPXM_BUILD"
+echo "  Testing:     $TESTING_DIR"
+echo "  Config:      $CONFIG_FILE"
 echo "  Commits:     ${#COMMITS[@]}"
 echo "  Runs/bench:  $NUM_RUNS"
 echo "  Proc counts: $NUM_PROCS"
@@ -48,6 +72,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Detect CPU count portably
+if command -v nproc &>/dev/null; then
+    NJOBS=$(nproc)
+else
+    NJOBS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+fi
+
 for i in "${!COMMITS[@]}"; do
     SHA="${COMMITS[$i]}"
     SHORT_SHA="${SHA:0:10}"
@@ -63,7 +94,7 @@ for i in "${!COMMITS[@]}"; do
 
     # Build
     echo "  Building..."
-    if ! cmake --build "$WARPXM_BUILD" -j$(sysctl -n hw.ncpu) > /tmp/warpxm-build-$SHORT_SHA.log 2>&1; then
+    if ! cmake --build "$WARPXM_BUILD" "-j$NJOBS" > "/tmp/warpxm-build-$SHORT_SHA.log" 2>&1; then
         echo "  BUILD FAILED — skipping (see /tmp/warpxm-build-$SHORT_SHA.log)"
         echo
         continue
@@ -73,7 +104,7 @@ for i in "${!COMMITS[@]}"; do
     # Run benchmarks
     echo "  Running benchmarks..."
     cd "$TESTING_DIR"
-    if ! uv run warpxm-test run-all -n "$NUM_RUNS" --num-procs "$NUM_PROCS"; then
+    if ! uv run wxm-bench run-all -n "$NUM_RUNS" --num-procs "$NUM_PROCS"; then
         echo "  BENCHMARK FAILED — continuing to next commit"
     fi
     cd "$WARPXM_SRC"

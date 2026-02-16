@@ -21,6 +21,8 @@ def run_benchmark(
     num_procs: int = 0,
     mpirun: str = "mpiexec",
     work_dir: Path | None = None,
+    cpu_override: str | None = None,
+    gpu_override: str | None = None,
 ) -> dict:
     """Run a single benchmark and store results.
 
@@ -33,11 +35,15 @@ def run_benchmark(
         num_procs: Number of MPI processes (0 = serial).
         mpirun: MPI launcher command.
         work_dir: Working directory for the run.
+        cpu_override: Override auto-detected CPU name.
+        gpu_override: Override auto-detected GPU name.
 
     Returns:
         Dict with run_id, wall_time_s, success, timing data.
     """
-    hw = hardware.get_hardware_info()
+    hw = hardware.get_hardware_info(
+        cpu_override=cpu_override, gpu_override=gpu_override
+    )
 
     run_id = db.insert_run(
         conn,
@@ -130,13 +136,17 @@ def run_benchmark_averaged(
     mpirun: str = "mpiexec",
     work_dir: Path | None = None,
     git_sha: str = "",
+    cpu_override: str | None = None,
+    gpu_override: str | None = None,
 ) -> dict:
     """Run a benchmark multiple times and compute averages.
 
     Returns:
         Dict with aggregate_id, individual results, and summary statistics.
     """
-    hw = hardware.get_hardware_info()
+    hw = hardware.get_hardware_info(
+        cpu_override=cpu_override, gpu_override=gpu_override
+    )
     results = []
 
     for i in range(num_runs):
@@ -150,6 +160,8 @@ def run_benchmark_averaged(
             num_procs=num_procs,
             mpirun=mpirun,
             work_dir=work_dir,
+            cpu_override=cpu_override,
+            gpu_override=gpu_override,
         )
         results.append(r)
         if r["success"]:

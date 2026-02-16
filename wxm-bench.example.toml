@@ -1,0 +1,32 @@
+# wxm-bench configuration
+#
+# Copy this file to wxm-bench.toml and uncomment/edit the values
+# you want to override. All settings are optional — the tool works
+# without a config file using built-in defaults.
+#
+# Precedence: CLI arguments > config file > built-in defaults
+
+[paths]
+source_dir = "~/GitHub/warpxm"
+build_dir = "~/GitHub/warpxm/build"
+# db = "benchmarks.db"
+# work_dir = "benchmark_runs"
+
+[hardware]
+# Override auto-detected hardware names. Useful when detection fails
+# or you want consistent naming across machines.
+# cpu = "Apple M1"
+# gpu = "Apple M1 (integrated)"
+
+[build]
+# build_type = "Release"
+# cmake_args = "-DWXM_ENABLE_CUDA=ON -DCMAKE_CXX_COMPILER=g++-13"
+# jobs = 8
+
+[run]
+# num_runs = 3
+# num_procs = "0,6"
+# mpi_launcher = "mpiexec"
+
+[grafana]
+# provisioning_dir = "/opt/homebrew/Cellar/grafana/12.3.3/share/grafana/conf/provisioning"

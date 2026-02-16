@@ -1,21 +1,48 @@
-"""Command-line interface for warpxm-test."""
+"""Command-line interface for wxm-bench."""
 
 import argparse
 from pathlib import Path
 
 from . import benchmarks, builder, hardware, runner
+from . import config as cfg
 from . import database as db
 
-DEFAULT_SOURCE_DIR = Path.home() / "GitHub" / "warpxm"
-DEFAULT_BUILD_DIR = Path.home() / "GitHub" / "warpxm" / "build"
+_DEFAULT_SOURCE_DIR = str(Path.home() / "GitHub" / "warpxm")
+_DEFAULT_BUILD_DIR = str(Path.home() / "GitHub" / "warpxm" / "build")
+_DEFAULT_GRAFANA_PROV_DIR = (
+    "/opt/homebrew/Cellar/grafana/12.3.3/share/grafana/conf/provisioning"
+)
+GRAFANA_DIR = Path(__file__).resolve().parent.parent.parent / "grafana"
+
+
+def _resolve(args, attr: str, config: dict, *keys: str, default):
+    """Return CLI arg if set, else config value, else hardcoded default.
+
+    CLI args that were not provided have value None (sentinel).
+    """
+    cli_val = getattr(args, attr, None)
+    if cli_val is not None:
+        return cli_val
+    config_val = cfg.get(config, *keys)
+    if config_val is not None:
+        return config_val
+    return default
 
 
 def cmd_hw_info(args):
     """Print detected hardware information."""
-    info = hardware.get_hardware_info()
+    cpu_ov = cfg.get(args._config, "hardware", "cpu")
+    gpu_ov = cfg.get(args._config, "hardware", "gpu")
+    info = hardware.get_hardware_info(cpu_override=cpu_ov, gpu_override=gpu_ov)
     print(f"CPU:         {info['cpu']}")
     print(f"GPU:         {info['gpu']}")
     print(f"Hardware ID: {info['hardware_id']}")
+    if cpu_ov or gpu_ov:
+        print()
+        if cpu_ov:
+            print(f"  (CPU from config, auto-detected: {hardware.get_cpu_name()})")
+        if gpu_ov:
+            print(f"  (GPU from config, auto-detected: {hardware.get_gpu_name()})")
 
 
 def cmd_init_db(args):
@@ -27,21 +54,43 @@ def cmd_init_db(args):
 
 def cmd_build(args):
     """Build WARPXM."""
-    source_dir = Path(args.source_dir)
-    build_dir = Path(args.build_dir)
+    config = args._config
+    source_dir = Path(
+        _resolve(
+            args,
+            "source_dir",
+            config,
+            "paths",
+            "source_dir",
+            default=_DEFAULT_SOURCE_DIR,
+        )
+    )
+    build_dir = Path(
+        _resolve(
+            args, "build_dir", config, "paths", "build_dir", default=_DEFAULT_BUILD_DIR
+        )
+    )
+    build_type = _resolve(
+        args, "build_type", config, "build", "build_type", default="Release"
+    )
 
-    extra_args = args.cmake_args.split() if args.cmake_args else None
+    cmake_args_str = _resolve(
+        args, "cmake_args", config, "build", "cmake_args", default=None
+    )
+    extra_args = cmake_args_str.split() if cmake_args_str else None
+
+    jobs = _resolve(args, "jobs", config, "build", "jobs", default=None)
 
     print(f"Building WARPXM from {source_dir}")
     print(f"Build directory: {build_dir}")
-    print(f"Build type: {args.build_type}")
+    print(f"Build type: {build_type}")
 
     info = builder.build_warpxm(
         source_dir=source_dir,
         build_dir=build_dir,
-        build_type=args.build_type,
+        build_type=build_type,
         extra_cmake_args=extra_args,
-        jobs=args.jobs,
+        jobs=jobs,
     )
 
     # Store build in DB
@@ -64,19 +113,36 @@ def cmd_build(args):
 
 def cmd_run(args):
     """Run a benchmark."""
+    config = args._config
     db_path = Path(args.db)
     db.init_db(db_path)
     conn = db.get_connection(db_path)
 
-    source_dir = Path(args.source_dir)
-    build_dir = Path(args.build_dir)
+    source_dir = Path(
+        _resolve(
+            args,
+            "source_dir",
+            config,
+            "paths",
+            "source_dir",
+            default=_DEFAULT_SOURCE_DIR,
+        )
+    )
+    build_dir = Path(
+        _resolve(
+            args, "build_dir", config, "paths", "build_dir", default=_DEFAULT_BUILD_DIR
+        )
+    )
+    build_type = _resolve(
+        args, "build_type", config, "build", "build_type", default="Release"
+    )
 
     # Resolve build
     warpxm_exec = builder.get_warpxm_exec(build_dir)
     git_info = builder.get_git_info(source_dir)
 
     # Find or create a build record
-    existing = db.find_build(conn, git_info["sha"], args.build_type)
+    existing = db.find_build(conn, git_info["sha"], build_type)
     if existing:
         build_id = existing["id"]
         print(f"Using existing build record (build_id={build_id})")
@@ -85,7 +151,7 @@ def cmd_run(args):
             conn,
             git_sha=git_info["sha"],
             git_branch=git_info["branch"],
-            build_type=args.build_type,
+            build_type=build_type,
             cmake_args=None,
         )
         print(f"Created build record (build_id={build_id})")
@@ -94,9 +160,18 @@ def cmd_run(args):
     benchmark_name = args.benchmark
     input_file = benchmarks.get_input_file(benchmark_name)
 
-    work_dir = Path(args.work_dir) if args.work_dir else Path.cwd() / "benchmark_runs"
+    work_dir_str = _resolve(args, "work_dir", config, "paths", "work_dir", default=None)
+    work_dir = Path(work_dir_str) if work_dir_str else Path.cwd() / "benchmark_runs"
     benchmark_work_dir = work_dir / benchmark_name
     benchmark_work_dir.mkdir(parents=True, exist_ok=True)
+
+    num_runs = _resolve(args, "num_runs", config, "run", "num_runs", default=3)
+    num_procs = _resolve(
+        args, "num_procs", config, "run", "num_procs_single", default=0
+    )
+    mpi_launcher = cfg.get(config, "run", "mpi_launcher") or "mpiexec"
+    cpu_ov = cfg.get(config, "hardware", "cpu")
+    gpu_ov = cfg.get(config, "hardware", "gpu")
 
     # Run it
     result = runner.run_benchmark_averaged(
@@ -105,10 +180,13 @@ def cmd_run(args):
         warpxm_exec=warpxm_exec,
         build_id=build_id,
         conn=conn,
-        num_runs=args.num_runs,
-        num_procs=args.num_procs,
+        num_runs=num_runs,
+        num_procs=num_procs,
+        mpirun=mpi_launcher,
         work_dir=benchmark_work_dir,
         git_sha=git_info["sha"],
+        cpu_override=cpu_ov,
+        gpu_override=gpu_ov,
     )
 
     conn.close()
@@ -117,17 +195,34 @@ def cmd_run(args):
 
 def cmd_run_all(args):
     """Run all benchmarks at each specified process count."""
+    config = args._config
     db_path = Path(args.db)
     db.init_db(db_path)
     conn = db.get_connection(db_path)
 
-    source_dir = Path(args.source_dir)
-    build_dir = Path(args.build_dir)
+    source_dir = Path(
+        _resolve(
+            args,
+            "source_dir",
+            config,
+            "paths",
+            "source_dir",
+            default=_DEFAULT_SOURCE_DIR,
+        )
+    )
+    build_dir = Path(
+        _resolve(
+            args, "build_dir", config, "paths", "build_dir", default=_DEFAULT_BUILD_DIR
+        )
+    )
+    build_type = _resolve(
+        args, "build_type", config, "build", "build_type", default="Release"
+    )
 
     warpxm_exec = builder.get_warpxm_exec(build_dir)
     git_info = builder.get_git_info(source_dir)
 
-    existing = db.find_build(conn, git_info["sha"], args.build_type)
+    existing = db.find_build(conn, git_info["sha"], build_type)
     if existing:
         build_id = existing["id"]
         print(f"Using existing build record (build_id={build_id})")
@@ -136,14 +231,23 @@ def cmd_run_all(args):
             conn,
             git_sha=git_info["sha"],
             git_branch=git_info["branch"],
-            build_type=args.build_type,
+            build_type=build_type,
             cmake_args=None,
         )
         print(f"Created build record (build_id={build_id})")
 
-    proc_counts = [int(p) for p in args.num_procs.split(",")]
+    num_procs_str = _resolve(
+        args, "num_procs", config, "run", "num_procs", default="0,6"
+    )
+    proc_counts = [int(p) for p in str(num_procs_str).split(",")]
+    num_runs = _resolve(args, "num_runs", config, "run", "num_runs", default=3)
+    mpi_launcher = cfg.get(config, "run", "mpi_launcher") or "mpiexec"
+    cpu_ov = cfg.get(config, "hardware", "cpu")
+    gpu_ov = cfg.get(config, "hardware", "gpu")
+
     all_benchmarks = benchmarks.list_benchmarks()
-    work_dir = Path(args.work_dir) if args.work_dir else Path.cwd() / "benchmark_runs"
+    work_dir_str = _resolve(args, "work_dir", config, "paths", "work_dir", default=None)
+    work_dir = Path(work_dir_str) if work_dir_str else Path.cwd() / "benchmark_runs"
 
     if not all_benchmarks:
         print("No benchmark .inp files found.")
@@ -174,10 +278,13 @@ def cmd_run_all(args):
                 warpxm_exec=warpxm_exec,
                 build_id=build_id,
                 conn=conn,
-                num_runs=args.num_runs,
+                num_runs=num_runs,
                 num_procs=np,
+                mpirun=mpi_launcher,
                 work_dir=benchmark_work_dir,
                 git_sha=git_info["sha"],
+                cpu_override=cpu_ov,
+                gpu_override=gpu_ov,
             )
 
     conn.close()
@@ -193,15 +300,19 @@ def cmd_list(args):
         print(name)
 
 
-GRAFANA_PROVISIONING_DIR = Path(
-    "/opt/homebrew/Cellar/grafana/12.3.3/share/grafana/conf/provisioning"
-)
-GRAFANA_DIR = Path(__file__).resolve().parent.parent.parent / "grafana"
-
-
 def cmd_setup_grafana(args):
     """Set up Grafana datasource and dashboard provisioning."""
-    prov_dir = Path(args.grafana_provisioning_dir)
+    config = args._config
+    prov_dir = Path(
+        _resolve(
+            args,
+            "grafana_provisioning_dir",
+            config,
+            "grafana",
+            "provisioning_dir",
+            default=_DEFAULT_GRAFANA_PROV_DIR,
+        )
+    )
     db_path = Path(args.db).resolve()
 
     # Ensure DB exists
@@ -283,12 +394,17 @@ def cmd_results(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="warpxm-test",
+        prog="wxm-bench",
         description="Performance testing framework for WARPXM",
     )
     parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to config file (default: wxm-bench.toml in project root)",
+    )
+    parser.add_argument(
         "--db",
-        default=str(db.DEFAULT_DB_PATH),
+        default=None,
         help="Path to SQLite database file",
     )
 
@@ -308,19 +424,11 @@ def main():
 
     # build
     sub = subparsers.add_parser("build", help="Build WARPXM")
-    sub.add_argument(
-        "--source-dir",
-        default=str(DEFAULT_SOURCE_DIR),
-        help="WARPXM source directory",
-    )
-    sub.add_argument(
-        "--build-dir",
-        default=str(DEFAULT_BUILD_DIR),
-        help="WARPXM build directory",
-    )
+    sub.add_argument("--source-dir", default=None, help="WARPXM source directory")
+    sub.add_argument("--build-dir", default=None, help="WARPXM build directory")
     sub.add_argument(
         "--build-type",
-        default="Release",
+        default=None,
         choices=["Release", "Debug", "RelWithDebInfo"],
     )
     sub.add_argument("--cmake-args", default=None, help="Extra cmake arguments")
@@ -329,41 +437,18 @@ def main():
 
     # run
     sub = subparsers.add_parser("run", help="Run a benchmark")
+    sub.add_argument("benchmark", help="Benchmark name (e.g. 'advection')")
     sub.add_argument(
-        "benchmark",
-        help="Benchmark name (e.g. 'advection')",
+        "-n", "--num-runs", type=int, default=None, help="Number of runs to average"
     )
     sub.add_argument(
-        "-n",
-        "--num-runs",
-        type=int,
-        default=3,
-        help="Number of runs to average",
+        "--num-procs", type=int, default=None, help="MPI processes (0 = serial)"
     )
+    sub.add_argument("--source-dir", default=None, help="WARPXM source directory")
+    sub.add_argument("--build-dir", default=None, help="WARPXM build directory")
+    sub.add_argument("--build-type", default=None)
     sub.add_argument(
-        "--num-procs",
-        type=int,
-        default=0,
-        help="MPI processes (0 = serial)",
-    )
-    sub.add_argument(
-        "--source-dir",
-        default=str(DEFAULT_SOURCE_DIR),
-        help="WARPXM source directory",
-    )
-    sub.add_argument(
-        "--build-dir",
-        default=str(DEFAULT_BUILD_DIR),
-        help="WARPXM build directory",
-    )
-    sub.add_argument(
-        "--build-type",
-        default="Release",
-    )
-    sub.add_argument(
-        "--work-dir",
-        default=None,
-        help="Working directory for benchmark runs",
+        "--work-dir", default=None, help="Working directory for benchmark runs"
     )
     sub.set_defaults(func=cmd_run)
 
@@ -373,29 +458,19 @@ def main():
         "-n",
         "--num-runs",
         type=int,
-        default=3,
+        default=None,
         help="Number of runs to average per benchmark",
     )
     sub.add_argument(
         "--num-procs",
-        default="0,6",
+        default=None,
         help="Comma-separated list of MPI process counts (0 = serial)",
     )
+    sub.add_argument("--source-dir", default=None, help="WARPXM source directory")
+    sub.add_argument("--build-dir", default=None, help="WARPXM build directory")
+    sub.add_argument("--build-type", default=None)
     sub.add_argument(
-        "--source-dir",
-        default=str(DEFAULT_SOURCE_DIR),
-        help="WARPXM source directory",
-    )
-    sub.add_argument(
-        "--build-dir",
-        default=str(DEFAULT_BUILD_DIR),
-        help="WARPXM build directory",
-    )
-    sub.add_argument("--build-type", default="Release")
-    sub.add_argument(
-        "--work-dir",
-        default=None,
-        help="Working directory for benchmark runs",
+        "--work-dir", default=None, help="Working directory for benchmark runs"
     )
     sub.set_defaults(func=cmd_run_all)
 
@@ -412,12 +487,21 @@ def main():
     )
     sub.add_argument(
         "--grafana-provisioning-dir",
-        default=str(GRAFANA_PROVISIONING_DIR),
+        default=None,
         help="Grafana provisioning directory",
     )
     sub.set_defaults(func=cmd_setup_grafana)
 
     args = parser.parse_args()
+
+    # Load config
+    config_path = Path(args.config) if args.config else None
+    args._config = cfg.load_config(config_path)
+
+    # Resolve db path: CLI > config > default
+    if args.db is None:
+        args.db = cfg.get(args._config, "paths", "db") or str(db.DEFAULT_DB_PATH)
+
     args.func(args)
 
 

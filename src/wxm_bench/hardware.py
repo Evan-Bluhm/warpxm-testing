@@ -53,15 +53,27 @@ def get_gpu_name() -> str:
     return "none"
 
 
-def get_hardware_id() -> str:
+def get_hardware_id(
+    cpu_override: str | None = None,
+    gpu_override: str | None = None,
+) -> str:
     """Return a unique hardware identifier string: 'cpu | gpu'."""
-    return f"{get_cpu_name()} | {get_gpu_name()}"
+    cpu = cpu_override or get_cpu_name()
+    gpu = gpu_override or get_gpu_name()
+    return f"{cpu} | {gpu}"
 
 
-def get_hardware_info() -> dict:
-    """Return a dict with cpu, gpu, and combined hardware_id."""
-    cpu = get_cpu_name()
-    gpu = get_gpu_name()
+def get_hardware_info(
+    cpu_override: str | None = None,
+    gpu_override: str | None = None,
+) -> dict:
+    """Return a dict with cpu, gpu, and combined hardware_id.
+
+    If cpu_override or gpu_override are provided, they replace
+    the auto-detected values.
+    """
+    cpu = cpu_override or get_cpu_name()
+    gpu = gpu_override or get_gpu_name()
     return {
         "cpu": cpu,
         "gpu": gpu,
