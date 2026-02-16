@@ -1,0 +1,158 @@
+<warpxm>
+  Simulation = sim
+  NumericPrecision = double
+  RunName = data/advection
+  LogName = log/advection
+  GlobalVerbosity = info
+  Verbosity = info
+  <sim>
+    Type = WmSolverBase
+    Kind = WmSolver
+    Time = [0, 2.0]
+    Out = 100
+    EnableFPE = 1
+    FlexibleWriteout = 0
+    NumPartitions = 1
+    WriteFrameOnException = 1
+    <mesh>
+      Type = mesh
+      Kind = block
+      NumLayers = 1
+      OutputMeshPrefix = meshes/restartMesh
+      Bounds = [-0.5, 0.5]
+      NumCells = [128]
+      NodeSets = [Left, Right]
+      PeriodicBoundaries = [Left, Right]
+      NodalMeshPrefix = meshes/plotMesh
+      BasisArraySet = thirdOrder
+    </mesh>
+    <dt_controller>
+      Type = WmHostAction
+      Kind = time_stepper.fixed_dt
+      InitDt = 0.0001
+      CheckCFL = 1
+    </dt_controller>
+    <fluid>
+      Type = variable
+      Kind = distributed
+      ComponentNames = [rho]
+      BasisArraySet = thirdOrder
+    </fluid>
+    <fluid_1>
+      Type = variable
+      Kind = distributed
+      ComponentNames = [rho]
+      BasisArraySet = thirdOrder
+    </fluid_1>
+    <fluid_2>
+      Type = variable
+      Kind = distributed
+      ComponentNames = [rho]
+      BasisArraySet = thirdOrder
+    </fluid_2>
+    <fluid_3>
+      Type = variable
+      Kind = distributed
+      ComponentNames = [rho]
+      BasisArraySet = thirdOrder
+    </fluid_3>
+    <swapper>
+      Type = WmHostAction
+      Kind = variableSwapper
+      WriteVars = [fluid, fluid_3]
+    </swapper>
+    <ic_ha>
+      Type = WmHostAction
+      Kind = va_runner
+      Vars = [fluid.rho]
+      <ic_va>
+        Process = function_evaluator
+        Type = WmHostAction
+        Kind = patchProcessor
+        BasisArraySet = thirdOrder
+        Priority = 0
+        OnSubdomains = [all]
+        <fluid_ic>
+          Type = application
+          Kind = fourier_app
+          SineAmplitudes = [1]
+          SineFrequencies = [6.283185307179586]
+          OutputVariables = [0]
+        </fluid_ic>
+      </ic_va>
+    </ic_ha>
+    <writer>
+      Type = WmHostAction
+      Kind = writeOut
+      ReadVars = [fluid]
+      WriteInterval = 1
+    </writer>
+    <vloader>
+      Type = WmHostAction
+      Kind = variableLoader
+      SourceFilePrefix = data/advection
+      WriteVars = [fluid]
+    </vloader>
+    <gsync>
+      Type = WmHostAction
+      Kind = synchronizer
+      WriteVars = [fluid]
+    </gsync>
+    <rk>
+      Type = WmHostAction
+      Kind = explicit_runge_kutta
+      Scheme = SSPRK3
+      QOld = [fluid.rho]
+      QStorage0 = [fluid_1.rho]
+      QStorage1 = [fluid_2.rho]
+      QStorage2 = [fluid_3.rho]
+      <dg>
+        Process = spatial_solver.dg
+        Type = WmHostAction
+        Kind = patchProcessor
+        BasisArraySet = thirdOrder
+        SourceQuadratureStyle = LGL
+        OnSubdomains = [all]
+        <advection>
+          Type = application
+          Kind = advection
+          Velocity = [1.0, 0.0, 0.0]
+          Density = [0]
+        </advection>
+      </dg>
+    </rk>
+    <perstep_group>
+      Type = WmSequencedGroup
+      Kind = hostSequencedGroup
+      HostActions = [rk]
+    </perstep_group>
+    <vload_group>
+      Type = WmSequencedGroup
+      Kind = hostSequencedGroup
+      HostActions = [vloader, gsync]
+    </vload_group>
+    <start_only_group>
+      Type = WmSequencedGroup
+      Kind = hostSequencedGroup
+      HostActions = [ic_ha, gsync]
+    </start_only_group>
+    <swap_group>
+      Type = WmSequencedGroup
+      Kind = hostSequencedGroup
+      HostActions = [swapper]
+    </swap_group>
+    <write_group>
+      Type = WmSequencedGroup
+      Kind = hostSequencedGroup
+      HostActions = [writer]
+    </write_group>
+    <SolverSequence>
+      Type = WmSolverSequence
+      StartOnly = [start_only_group]
+      PerStep = [write_group, perstep_group, swap_group]
+      PreRedoPerStep = [swap_group]
+      EndOnly = [write_group]
+      Restart = [vload_group]
+    </SolverSequence>
+  </sim>
+</warpxm>
