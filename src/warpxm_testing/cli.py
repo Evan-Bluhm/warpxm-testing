@@ -193,6 +193,48 @@ def cmd_list(args):
         print(name)
 
 
+GRAFANA_PROVISIONING_DIR = Path(
+    "/opt/homebrew/Cellar/grafana/12.3.3/share/grafana/conf/provisioning"
+)
+GRAFANA_DIR = Path(__file__).resolve().parent.parent.parent / "grafana"
+
+
+def cmd_setup_grafana(args):
+    """Set up Grafana datasource and dashboard provisioning."""
+    prov_dir = Path(args.grafana_provisioning_dir)
+    db_path = Path(args.db).resolve()
+
+    # Ensure DB exists
+    db.init_db(db_path)
+
+    # --- Datasource ---
+    ds_src = GRAFANA_DIR / "datasources" / "warpxm-benchmarks.yaml"
+    ds_content = ds_src.read_text().replace("__BENCHMARKS_DB_PATH__", str(db_path))
+
+    ds_dest = prov_dir / "datasources" / "warpxm-benchmarks.yaml"
+    ds_dest.parent.mkdir(parents=True, exist_ok=True)
+    ds_dest.write_text(ds_content)
+    print(f"Wrote datasource: {ds_dest}")
+
+    # --- Dashboard provider ---
+    dashboards_dir = (GRAFANA_DIR / "dashboards").resolve()
+    dp_src = GRAFANA_DIR / "dashboards" / "provider.yaml"
+    dp_content = dp_src.read_text().replace(
+        "__DASHBOARDS_DIR_PATH__", str(dashboards_dir)
+    )
+
+    dp_dest = prov_dir / "dashboards" / "warpxm-benchmarks.yaml"
+    dp_dest.parent.mkdir(parents=True, exist_ok=True)
+    dp_dest.write_text(dp_content)
+    print(f"Wrote dashboard provider: {dp_dest}")
+
+    print(f"\nDatasource DB path: {db_path}")
+    print(f"Dashboard JSON dir: {dashboards_dir}")
+    print("\nRestart Grafana to apply:")
+    print("  brew services restart grafana")
+    print("\nThen open: http://localhost:3000")
+
+
 def cmd_results(args):
     """Show stored benchmark results."""
     db_path = Path(args.db)
@@ -363,6 +405,17 @@ def main():
     sub.add_argument("--hardware-id", default=None, help="Filter by hardware ID")
     sub.add_argument("--limit", type=int, default=20, help="Max results to show")
     sub.set_defaults(func=cmd_results)
+
+    # setup-grafana
+    sub = subparsers.add_parser(
+        "setup-grafana", help="Set up Grafana datasource and dashboard"
+    )
+    sub.add_argument(
+        "--grafana-provisioning-dir",
+        default=str(GRAFANA_PROVISIONING_DIR),
+        help="Grafana provisioning directory",
+    )
+    sub.set_defaults(func=cmd_setup_grafana)
 
     args = parser.parse_args()
     args.func(args)

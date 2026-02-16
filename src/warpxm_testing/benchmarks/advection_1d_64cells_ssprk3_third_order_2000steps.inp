@@ -9,7 +9,7 @@
     Type = WmSolverBase
     Kind = WmSolver
     Time = [0, 0.2]
-    Out = 100
+    Out = 1
     EnableFPE = 1
     FlexibleWriteout = 0
     NumPartitions = 1

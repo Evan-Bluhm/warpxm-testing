@@ -56,6 +56,7 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
             benchmark_name  TEXT NOT NULL,
             hardware_id     TEXT NOT NULL,
             git_sha         TEXT NOT NULL,
+            num_procs       INTEGER NOT NULL DEFAULT 1,
             num_runs        INTEGER NOT NULL,
             mean_wall_time_s    REAL NOT NULL,
             stddev_wall_time_s  REAL,
@@ -72,7 +73,23 @@ def init_db(db_path: Path = DEFAULT_DB_PATH) -> None:
         """
     )
     conn.commit()
+
+    # Migrations for existing databases
+    _migrate_add_column(
+        conn, "aggregate_results", "num_procs", "INTEGER NOT NULL DEFAULT 1"
+    )
+
     conn.close()
+
+
+def _migrate_add_column(
+    conn: sqlite3.Connection, table: str, column: str, column_def: str
+) -> None:
+    """Add a column to a table if it doesn't already exist."""
+    cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_def}")
+        conn.commit()
 
 
 def insert_build(
@@ -153,6 +170,7 @@ def insert_aggregate(
     benchmark_name: str,
     hardware_id: str,
     git_sha: str,
+    num_procs: int,
     num_runs: int,
     mean_wall_time_s: float,
     stddev_wall_time_s: float | None,
@@ -160,13 +178,14 @@ def insert_aggregate(
 ) -> int:
     cur = conn.execute(
         """INSERT INTO aggregate_results
-           (benchmark_name, hardware_id, git_sha, num_runs,
+           (benchmark_name, hardware_id, git_sha, num_procs, num_runs,
             mean_wall_time_s, stddev_wall_time_s, computed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             benchmark_name,
             hardware_id,
             git_sha,
+            num_procs,
             num_runs,
             mean_wall_time_s,
             stddev_wall_time_s,

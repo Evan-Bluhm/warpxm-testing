@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: WARPXM Benchmarks
+    orgId: 1
+    folder: WARPXM
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: __DASHBOARDS_DIR_PATH__

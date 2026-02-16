@@ -1,0 +1,188 @@
+{
+  "uid": "warpxm-benchmarks",
+  "title": "WARPXM Benchmark Results",
+  "tags": ["warpxm", "benchmarks"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 4,
+  "refresh": "",
+  "templating": {
+    "list": [
+      {
+        "name": "git_branch",
+        "label": "Git Branch",
+        "type": "query",
+        "datasource": { "type": "frser-sqlite-datasource", "uid": "warpxm-benchmarks" },
+        "query": "SELECT DISTINCT git_branch FROM builds WHERE git_branch IS NOT NULL ORDER BY git_branch",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "benchmark",
+        "label": "Benchmark",
+        "type": "query",
+        "datasource": { "type": "frser-sqlite-datasource", "uid": "warpxm-benchmarks" },
+        "query": "SELECT DISTINCT benchmark_name FROM aggregate_results ORDER BY benchmark_name",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "num_procs",
+        "label": "Num Procs",
+        "type": "query",
+        "datasource": { "type": "frser-sqlite-datasource", "uid": "warpxm-benchmarks" },
+        "query": "SELECT DISTINCT num_procs FROM aggregate_results ORDER BY num_procs",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "scope",
+        "label": "Scope",
+        "type": "query",
+        "datasource": { "type": "frser-sqlite-datasource", "uid": "warpxm-benchmarks" },
+        "query": "SELECT DISTINCT scope FROM aggregate_scopes ORDER BY scope",
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Wall Time by Commit",
+      "description": "Mean wall time per benchmark across WARPXM commits",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "warpxm-benchmarks" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT substr(ar.git_sha, 1, 8) AS git_commit, ar.benchmark_name || ' (np=' || ar.num_procs || ')' AS series, ar.mean_wall_time_s AS wall_time_s FROM aggregate_results ar JOIN builds b ON b.git_sha = ar.git_sha WHERE ('${git_branch}' = '$__all' OR b.git_branch IN (${git_branch:singlequote})) AND ('${benchmark}' = '$__all' OR ar.benchmark_name IN (${benchmark:singlequote})) AND ('${num_procs}' = '$__all' OR ar.num_procs IN (${num_procs:raw})) ORDER BY ar.computed_at ASC",
+          "queryText": "",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "xField": "git_commit\\series",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.8,
+        "showValue": "auto",
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "columnField": "series",
+            "rowField": "git_commit",
+            "valueField": "wall_time_s",
+            "emptyValue": "null"
+          }
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Scope Timing by Commit",
+      "description": "Track a specific timing scope across commits",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "warpxm-benchmarks" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT substr(ar.git_sha, 1, 8) AS git_commit, ar.benchmark_name || ' (np=' || ar.num_procs || ')' AS series, asc2.mean_elapsed_ms AS elapsed_ms FROM aggregate_results ar JOIN aggregate_scopes asc2 ON asc2.aggregate_id = ar.id JOIN builds b ON b.git_sha = ar.git_sha WHERE asc2.scope = '${scope}' AND ('${git_branch}' = '$__all' OR b.git_branch IN (${git_branch:singlequote})) AND ('${benchmark}' = '$__all' OR ar.benchmark_name IN (${benchmark:singlequote})) AND ('${num_procs}' = '$__all' OR ar.num_procs IN (${num_procs:raw})) ORDER BY ar.computed_at ASC",
+          "queryText": "",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "xField": "git_commit\\series",
+        "stacking": "none",
+        "groupWidth": 0.7,
+        "barWidth": 0.8,
+        "showValue": "auto",
+        "legend": { "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi" }
+      },
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "columnField": "series",
+            "rowField": "git_commit",
+            "valueField": "elapsed_ms",
+            "emptyValue": "null"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Scope Breakdown (Latest Commit)",
+      "description": "Top timing scopes for the most recent aggregate result per benchmark",
+      "type": "table",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "frser-sqlite-datasource", "uid": "warpxm-benchmarks" },
+      "targets": [
+        {
+          "refId": "A",
+          "queryType": "table",
+          "rawQueryText": "SELECT ar.benchmark_name, ar.num_procs, substr(ar.git_sha, 1, 8) AS git_commit, asc2.scope, asc2.mean_elapsed_ms, asc2.stddev_elapsed_ms FROM aggregate_results ar JOIN aggregate_scopes asc2 ON asc2.aggregate_id = ar.id JOIN builds b ON b.git_sha = ar.git_sha WHERE ('${git_branch}' = '$__all' OR b.git_branch IN (${git_branch:singlequote})) AND ('${benchmark}' = '$__all' OR ar.benchmark_name IN (${benchmark:singlequote})) AND ('${num_procs}' = '$__all' OR ar.num_procs IN (${num_procs:raw})) AND ar.id IN (SELECT MAX(id) FROM aggregate_results GROUP BY benchmark_name, num_procs) ORDER BY ar.benchmark_name, ar.num_procs, asc2.mean_elapsed_ms DESC",
+          "queryText": "",
+          "timeColumns": []
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "mean_elapsed_ms" },
+            "properties": [
+              { "id": "unit", "value": "ms" },
+              { "id": "displayName", "value": "Mean (ms)" }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "stddev_elapsed_ms" },
+            "properties": [
+              { "id": "unit", "value": "ms" },
+              { "id": "displayName", "value": "Stddev (ms)" }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [{ "displayName": "Mean (ms)", "desc": true }]
+      }
+    }
+  ],
+  "time": { "from": "now-5y", "to": "now" }
+}

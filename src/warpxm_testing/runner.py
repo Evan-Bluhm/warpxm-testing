@@ -205,6 +205,7 @@ def run_benchmark_averaged(
         benchmark_name=benchmark_name,
         hardware_id=hw["hardware_id"],
         git_sha=git_sha,
+        num_procs=max(num_procs, 1),
         num_runs=len(successful),
         mean_wall_time_s=mean_wall,
         stddev_wall_time_s=stddev_wall,
