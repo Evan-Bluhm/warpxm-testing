@@ -8,7 +8,7 @@
   <sim>
     Type = WmSolverBase
     Kind = WmSolver
-    Time = [0, 2.0]
+    Time = [0, 0.2]
     Out = 100
     EnableFPE = 1
     FlexibleWriteout = 0

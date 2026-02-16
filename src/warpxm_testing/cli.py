@@ -115,6 +115,74 @@ def cmd_run(args):
     return result
 
 
+def cmd_run_all(args):
+    """Run all benchmarks at each specified process count."""
+    db_path = Path(args.db)
+    db.init_db(db_path)
+    conn = db.get_connection(db_path)
+
+    source_dir = Path(args.source_dir)
+    build_dir = Path(args.build_dir)
+
+    warpxm_exec = builder.get_warpxm_exec(build_dir)
+    git_info = builder.get_git_info(source_dir)
+
+    existing = db.find_build(conn, git_info["sha"], args.build_type)
+    if existing:
+        build_id = existing["id"]
+        print(f"Using existing build record (build_id={build_id})")
+    else:
+        build_id = db.insert_build(
+            conn,
+            git_sha=git_info["sha"],
+            git_branch=git_info["branch"],
+            build_type=args.build_type,
+            cmake_args=None,
+        )
+        print(f"Created build record (build_id={build_id})")
+
+    proc_counts = [int(p) for p in args.num_procs.split(",")]
+    all_benchmarks = benchmarks.list_benchmarks()
+    work_dir = Path(args.work_dir) if args.work_dir else Path.cwd() / "benchmark_runs"
+
+    if not all_benchmarks:
+        print("No benchmark .inp files found.")
+        conn.close()
+        return
+
+    print(
+        f"Running {len(all_benchmarks)} benchmark(s) x {len(proc_counts)} process count(s)"
+    )
+    print(f"  Benchmarks:     {', '.join(all_benchmarks)}")
+    print(f"  Process counts: {proc_counts}")
+    print()
+
+    for name in all_benchmarks:
+        input_file = benchmarks.get_input_file(name)
+        for np in proc_counts:
+            label = f"{name}/np={np}" if np > 0 else f"{name}/serial"
+            print(f"\n{'=' * 60}")
+            print(f"  {label}")
+            print(f"{'=' * 60}")
+
+            benchmark_work_dir = work_dir / name
+            benchmark_work_dir.mkdir(parents=True, exist_ok=True)
+
+            runner.run_benchmark_averaged(
+                benchmark_name=name,
+                input_file=input_file,
+                warpxm_exec=warpxm_exec,
+                build_id=build_id,
+                conn=conn,
+                num_runs=args.num_runs,
+                num_procs=np,
+                work_dir=benchmark_work_dir,
+                git_sha=git_info["sha"],
+            )
+
+    conn.close()
+
+
 def cmd_list(args):
     """List available benchmarks."""
     names = benchmarks.list_benchmarks()
@@ -256,6 +324,38 @@ def main():
         help="Working directory for benchmark runs",
     )
     sub.set_defaults(func=cmd_run)
+
+    # run-all
+    sub = subparsers.add_parser("run-all", help="Run all benchmarks")
+    sub.add_argument(
+        "-n",
+        "--num-runs",
+        type=int,
+        default=3,
+        help="Number of runs to average per benchmark",
+    )
+    sub.add_argument(
+        "--num-procs",
+        default="0,6",
+        help="Comma-separated list of MPI process counts (0 = serial)",
+    )
+    sub.add_argument(
+        "--source-dir",
+        default=str(DEFAULT_SOURCE_DIR),
+        help="WARPXM source directory",
+    )
+    sub.add_argument(
+        "--build-dir",
+        default=str(DEFAULT_BUILD_DIR),
+        help="WARPXM build directory",
+    )
+    sub.add_argument("--build-type", default="Release")
+    sub.add_argument(
+        "--work-dir",
+        default=None,
+        help="Working directory for benchmark runs",
+    )
+    sub.set_defaults(func=cmd_run_all)
 
     # results
     sub = subparsers.add_parser("results", help="Show benchmark results")
